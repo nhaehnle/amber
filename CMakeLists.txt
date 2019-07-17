@@ -205,7 +205,6 @@ function(amber_default_compile_options TARGET)
       -fno-exceptions
       -fvisibility=hidden
       -Wall
-      -Werror
       -Wextra
       -Wno-padded
       -Wno-switch-enum
