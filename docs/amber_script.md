@@ -109,7 +109,7 @@ file system, before falling back to the standard file system.
 
 Shader programs are declared using the `SHADER` command. \
 Shaders can be declared as `PASSTHROUGH`, with inlined source or using source
-from a `VIRTUAL_FILE`.
+from a `VIRTUAL_FILE` or from a `FILE` in the file system.
 
 Pass-through shader:
 
@@ -130,12 +130,12 @@ SHADER {shader_type} {shader_name} {shader_format} [ TARGET_ENV {target_env} ]
 END
 ```
 
-Shader using source from `VIRTUAL_FILE`:
+Shader using source from `VIRTUAL_FILE` or `FILE`:
 
 ```groovy
 # Creates a shader of |shader_type| with the given |shader_name|. The shader
 # will be of |shader_format|. The shader will use the virtual file with |path|.
-SHADER {shader_type} {shader_name} {shader_format} [ TARGET_ENV {target_env} ] VIRTUAL_FILE {path}
+SHADER {shader_type} {shader_name} {shader_format} [ TARGET_ENV {target_env} ] ( VIRTUAL_FILE | FILE ) {path}
 ```
 
 `{shader_name}` is used to identify the shader to attach to `PIPELINE`s,

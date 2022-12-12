@@ -508,19 +508,33 @@ Result Parser::ParseShaderBlock() {
   }
 
   token = tokenizer_->PeekNextToken();
-  if (token->IsIdentifier() && token->AsString() == "VIRTUAL_FILE") {
-    tokenizer_->NextToken();  // Skip VIRTUAL_FILE
+  if (token->IsIdentifier() &&
+      (token->AsString() == "VIRTUAL_FILE" || token->AsString() == "FILE")) {
+    bool isVirtual = token->AsString() == "VIRTUAL_FILE";
+    tokenizer_->NextToken();  // Skip VIRTUAL_FILE or FILE
 
     token = tokenizer_->NextToken();
     if (!token->IsIdentifier() && !token->IsString())
-      return Result("expected virtual file path after VIRTUAL_FILE");
+      return Result("expected virtual file path after VIRTUAL_FILE or FILE");
 
     auto path = token->AsString();
 
     std::string data;
-    r = script_->GetVirtualFile(path, &data);
-    if (!r.IsSuccess())
-      return r;
+    if (isVirtual) {
+      r = script_->GetVirtualFile(path, &data);
+      if (!r.IsSuccess())
+        return r;
+    } else {
+      if (!delegate_)
+        return Result("missing delegate for loading shader file");
+
+      std::vector<char> buffer;
+      r = delegate_->LoadFile(path, buffer);
+      if (!r.IsSuccess())
+        return r;
+
+      data.insert(data.begin(), buffer.begin(), buffer.end());
+    }
 
     shader->SetData(data);
     shader->SetFilePath(path);
@@ -3966,6 +3980,11 @@ Result Parser::ParseVirtualFile() {
   auto r = ValidateEndOfStatement("VIRTUAL_FILE command");
   if (!r.IsSuccess())
     return r;
+
+  // token = tokenizer_->PeekNextToken();
+  // if (token->IsIdentifier() && token->AsString() == "FILE") {
+
+  // }
 
   auto data = tokenizer_->ExtractToNext("END");
 
