@@ -1,4 +1,5 @@
 // Copyright 2018 The Amber Authors.
+// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -85,6 +86,11 @@ const char kSubgroupSupportedStagesCompute[] =
 
 const char kShaderSubgroupExtendedTypes[] =
     "ShaderSubgroupExtendedTypesFeatures.shaderSubgroupExtendedTypes";
+
+const char kAccelerationStructure[] =
+    "AccelerationStructureFeaturesKHR.accelerationStructure";
+const char kBufferDeviceAddress[] =
+    "BufferDeviceAddressFeatures.bufferDeviceAddress";
 
 struct BaseOutStructure {
   VkStructureType sType;
@@ -475,6 +481,10 @@ Result Device::Initialize(
       subgroup_size_control_features = nullptr;
   VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures*
       shader_subgroup_extended_types_ptrs = nullptr;
+  VkPhysicalDeviceAccelerationStructureFeaturesKHR*
+      acceleration_structure_ptrs = nullptr;
+  VkPhysicalDeviceBufferDeviceAddressFeatures*
+      bda_ptrs = nullptr;
   void* ptr = available_features2.pNext;
   while (ptr != nullptr) {
     BaseOutStructure* s = static_cast<BaseOutStructure*>(ptr);
@@ -504,6 +514,15 @@ Result Device::Initialize(
         shader_subgroup_extended_types_ptrs =
             static_cast<VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures*>(
                 ptr);
+        break;
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR:
+        acceleration_structure_ptrs =
+            static_cast<VkPhysicalDeviceAccelerationStructureFeaturesKHR*>(
+                ptr);
+        break;
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES:
+        bda_ptrs =
+            static_cast<VkPhysicalDeviceBufferDeviceAddressFeatures*>(ptr);
         break;
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
         vulkan11_ptrs = static_cast<VkPhysicalDeviceVulkan11Features*>(ptr);
@@ -566,6 +585,16 @@ Result Device::Initialize(
         vulkan12_ptrs == nullptr) {
       return amber::Result(
           "Subgroup extended types requested but feature not returned");
+    }
+    if (feature == kBufferDeviceAddress && bda_ptrs == nullptr &&
+        vulkan12_ptrs == nullptr) {
+      return amber::Result(
+          "Buffer device address requested but feature not returned");
+    }
+    if (feature == kAccelerationStructure &&
+        acceleration_structure_ptrs == nullptr) {
+      return amber::Result(
+          "Acceleration structure requested but feature not returned");
     }
 
     // Next check the fields of the feature structures.
@@ -653,6 +682,10 @@ Result Device::Initialize(
           vulkan12_ptrs->shaderSubgroupExtendedTypes != VK_TRUE) {
         return amber::Result("Missing subgroup extended types");
       }
+      if (feature == kBufferDeviceAddress &&
+          vulkan12_ptrs->bufferDeviceAddress != VK_TRUE) {
+        return amber::Result("Missing buffer device address");
+      }
     } else {
       // Vulkan 1.2 structure was not found. Use separate structures per each
       // feature.
@@ -679,6 +712,10 @@ Result Device::Initialize(
           shader_subgroup_extended_types_ptrs->shaderSubgroupExtendedTypes !=
               VK_TRUE) {
         return amber::Result("Missing subgroup extended types");
+      }
+      if (feature == kBufferDeviceAddress &&
+          bda_ptrs->bufferDeviceAddress != VK_TRUE) {
+        return amber::Result("Missing buffer device address");
       }
     }
 
@@ -709,6 +746,24 @@ Result Device::Initialize(
     return Result(
         "Vulkan: Device::Initialize given physical device does not support "
         "required extensions");
+  }
+
+  const bool needs_shader_group_handle_size =
+      std::find(required_features.begin(), required_features.end(),
+                kAccelerationStructure) != required_features.end();
+
+  if (needs_shader_group_handle_size) {
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_pipeline_properties = {};
+    rt_pipeline_properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+
+    VkPhysicalDeviceProperties2KHR properties2 = {};
+    properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    properties2.pNext = &rt_pipeline_properties;
+
+    ptrs_.vkGetPhysicalDeviceProperties2(physical_device_, &properties2);
+
+    shader_group_handle_size_ = rt_pipeline_properties.shaderGroupHandleSize;
   }
 
   ptrs_.vkGetPhysicalDeviceMemoryProperties(physical_device_,
@@ -1380,6 +1435,11 @@ uint32_t Device::GetMinSubgroupSize() const {
 uint32_t Device::GetMaxSubgroupSize() const {
   return subgroup_size_control_properties_.maxSubgroupSize;
 }
+
+uint32_t Device::GetRayTracingShaderGroupHandleSize() const {
+  return shader_group_handle_size_;
+}
+
 
 }  // namespace vulkan
 }  // namespace amber

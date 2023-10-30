@@ -1,4 +1,5 @@
 // Copyright 2018 The Amber Authors.
+// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +29,7 @@
 #include "src/shader_data.h"
 #include "src/tokenizer.h"
 #include "src/type_parser.h"
+#include "amber/vulkan_header.h"
 
 namespace amber {
 namespace amberscript {
@@ -322,6 +324,10 @@ Result Parser::Parse(const std::string& data) {
       r = ParseSampler();
     } else if (tok == "VIRTUAL_FILE") {
       r = ParseVirtualFile();
+    } else if (tok == "BLAS") {
+      r = ParseBLAS();
+    } else if (tok == "TLAS") {
+      r = ParseTLAS();
     } else {
       r = Result("unknown token: " + tok);
     }
@@ -404,6 +410,18 @@ Result Parser::ToShaderType(const std::string& str, ShaderType* type) {
     *type = kShaderTypeTessellationControl;
   else if (str == "compute")
     *type = kShaderTypeCompute;
+  else if (str == "ray_generation")
+    *type = kShaderTypeRayGeneration;
+  else if (str == "any_hit")
+    *type = kShaderTypeAnyHit;
+  else if (str == "closest_hit")
+    *type = kShaderTypeClosestHit;
+  else if (str == "miss")
+    *type = kShaderTypeMiss;
+  else if (str == "intersection")
+    *type = kShaderTypeIntersection;
+  else if (str == "callable")
+    *type = kShaderTypeCall;
   else if (str == "multi")
     *type = kShaderTypeMulti;
   else
@@ -436,6 +454,8 @@ Result Parser::ToPipelineType(const std::string& str, PipelineType* type) {
     *type = PipelineType::kCompute;
   else if (str == "graphics")
     *type = PipelineType::kGraphics;
+  else if (str == "raytracing")
+    *type = PipelineType::kRayTracing;
   else
     return Result("unknown pipeline type: " + str);
   return {};
@@ -548,6 +568,9 @@ Result Parser::ParseShaderBlock() {
   if (!token->IsIdentifier() || token->AsString() != "END")
     return Result("SHADER missing END command");
 
+  if (shader->GetTargetEnv().empty() && IsRayTracingShader(type))
+    shader->SetTargetEnv("spv1.4");
+
   r = script_->AddShader(std::move(shader));
   if (!r.IsSuccess())
     return r;
@@ -624,6 +647,10 @@ Result Parser::ParsePipelineBody(const std::string& cmd_name,
       r = ParsePipelinePatchControlPoints(pipeline.get());
     } else if (tok == "BLEND") {
       r = ParsePipelineBlend(pipeline.get());
+    } else if (tok == "SHADER_GROUP") {
+      r = ParsePipelineShaderGroup(pipeline.get());
+    } else if (tok == "SBT") {
+      r = ParseSBT(pipeline.get());
     } else {
       r = Result("unknown token in pipeline block: " + tok);
     }
@@ -1075,7 +1102,7 @@ Result Parser::ParsePipelineBind(Pipeline* pipeline) {
 
   if (!token->IsIdentifier()) {
     return Result(
-        "missing BUFFER, BUFFER_ARRAY, SAMPLER, or SAMPLER_ARRAY in BIND "
+        "missing BUFFER, BUFFER_ARRAY, SAMPLER, SAMPLER_ARRAY, or TLAS in BIND "
         "command");
   }
 
@@ -1416,6 +1443,35 @@ Result Parser::ParsePipelineBind(Pipeline* pipeline) {
     } else {
       return Result("missing DESCRIPTOR_SET or KERNEL for BIND command");
     }
+  } else if (object_type == "TLAS") {
+    token = tokenizer_->NextToken();
+    if (!token->IsIdentifier())
+      return Result("missing top level acceleration structure name in BIND command");
+
+    TLAS* tlas = script_->GetTLAS(token->AsString());
+    if (!tlas)
+      return Result("unknown TLAS: " + token->AsString());
+
+    token = tokenizer_->NextToken();
+    if (token->AsString() == "DESCRIPTOR_SET") {
+      token = tokenizer_->NextToken();
+      if (!token->IsInteger())
+        return Result("invalid value for DESCRIPTOR_SET in BIND command");
+      uint32_t descriptor_set = token->AsUint32();
+
+      token = tokenizer_->NextToken();
+      if (!token->IsIdentifier() || token->AsString() != "BINDING")
+        return Result("missing BINDING for BIND command");
+
+      token = tokenizer_->NextToken();
+      if (!token->IsInteger())
+        return Result("invalid value for BINDING in BIND command");
+
+      uint32_t binding = token->AsUint32();
+
+      pipeline->AddTLAS(tlas, descriptor_set, binding);
+    } else
+      return Result("missing DESCRIPTOR_SET or BINDING in BIND command");
   } else {
     return Result("missing BUFFER or SAMPLER in BIND command");
   }
@@ -1953,6 +2009,81 @@ Result Parser::ParsePipelineBlend(Pipeline* pipeline) {
   }
 
   return ValidateEndOfStatement("BLEND command");
+}
+
+Result Parser::ParsePipelineShaderGroup(Pipeline* pipeline) {
+  std::unique_ptr<Token> token = tokenizer_->NextToken();
+  if (!token->IsIdentifier())
+    return Result("Group name expected");
+
+  auto tok = token->AsString();
+  if (pipeline->GetShaderGroup(tok))
+    return Result("Group name already exists");
+  std::unique_ptr<ShaderGroup> group = MakeUnique<ShaderGroup>();
+  group->SetName(tok);
+
+  while (true) {
+    token = tokenizer_->NextToken();
+    if (token->IsEOL() || token->IsEOS())
+      break;
+    if (!token->IsIdentifier())
+      return Result("Shader name expected");
+
+    tok = token->AsString();
+    Shader* shader = script_->GetShader(tok);
+    if (shader == nullptr)
+      return Result("Shader not found: " + tok);
+
+    Result r = pipeline->AddShader(shader, shader->GetType());
+    if (!r.IsSuccess())
+      return r;
+
+    switch (shader->GetType()) {
+      case kShaderTypeRayGeneration:
+      case kShaderTypeMiss:
+      case kShaderTypeCall: {
+        if (group->IsHitGroup())
+          return Result("Hit group cannot contain general shaders");
+        if (group->GetGeneralShader() != nullptr)
+          return Result("Two general shaders cannot be in one group");
+        group->SetGeneralShader(shader);
+        break;
+      }
+      case kShaderTypeAnyHit: {
+        if (group->IsGeneralGroup())
+          return Result("General group cannot contain any hit shaders");
+        if (group->GetAnyHitShader() != nullptr)
+          return Result("Two any hit shaders cannot be in one group");
+        group->SetAnyHitShader(shader);
+        break;
+      }
+      case kShaderTypeClosestHit: {
+        if (group->IsGeneralGroup())
+          return Result("General group cannot contain closest hit shaders");
+        if (group->GetClosestHitShader() != nullptr)
+          return Result("Two closest hit shaders cannot be in one group");
+        group->SetClosestHitShader(shader);
+        break;
+      }
+      case kShaderTypeIntersection: {
+        if (group->IsGeneralGroup())
+          return Result("General group cannot contain intersection shaders");
+        if (group->GetIntersectionShader() != nullptr)
+          return Result("Two intersection shaders cannot be in one group");
+        group->SetIntersectionShader(shader);
+        break;
+      }
+      default:
+        return Result("Shader must be of raytracing type");
+    }
+  }
+
+  if (!group->IsGeneralGroup() && !group->IsHitGroup())
+    return Result("No shaders in shader group defined");
+
+  pipeline->AddShaderGroup(std::move(group));
+
+  return {};
 }
 
 Result Parser::ParseStruct() {
@@ -2571,6 +2702,46 @@ Result Parser::ParseRun() {
   auto* pipeline = script_->GetPipeline(token->AsString());
   if (!pipeline)
     return Result("unknown pipeline for RUN command: " + token->AsString());
+
+  if (pipeline->IsRayTracing()) {
+    auto cmd = MakeUnique<RayTracingCommand>(pipeline);
+    cmd->SetLine(line);
+
+    for (int i = 0; i < 4; i++) {
+      token = tokenizer_->NextToken();
+
+      if (!token->IsIdentifier())
+        return Result("SBT name expected");
+
+      std::string sbtname = token->AsString();
+      SBT* sbt = pipeline->GetSBT(sbtname);
+
+      if (sbtname != "NULL" && sbt == nullptr)
+        return Result("SBT is undefined: " + token->ToOriginalString());
+
+      if (i == 0)      cmd->SetRayGenSBTName(sbtname);
+      else if (i == 1) cmd->SetMissSBTName(sbtname);
+      else if (i == 2) cmd->SetHitsSBTName(sbtname);
+      else             cmd->SetCallSBTName(sbtname);
+    }
+
+    for (int i = 0; i < 3; i++) {
+      token = tokenizer_->NextToken();
+
+      if (!token->IsInteger())
+        return Result("invalid parameter for RUN command: " +
+                      token->ToOriginalString());
+      if (i == 0)
+        cmd->SetX(token->AsUint32());
+      else if (i == 1)
+        cmd->SetY(token->AsUint32());
+      else
+        cmd->SetZ(token->AsUint32());
+    }
+
+    command_list_.push_back(std::move(cmd));
+    return ValidateEndOfStatement("RUN command");
+  }
 
   token = tokenizer_->NextToken();
   if (token->IsEOL() || token->IsEOS())
@@ -3710,6 +3881,462 @@ Result Parser::ParseSampler() {
   }
 
   return script_->AddSampler(std::move(sampler));
+}
+
+bool Parser::IsRayTracingShader(ShaderType type) {
+  return type == kShaderTypeRayGeneration || type == kShaderTypeAnyHit ||
+         type == kShaderTypeClosestHit || type == kShaderTypeMiss ||
+         type == kShaderTypeIntersection || type == kShaderTypeCall;
+}
+
+Result Parser::ParseBLAS() {
+  auto token = tokenizer_->NextToken();
+  if (!token->IsIdentifier())
+    return Result("BLAS requires a name");
+
+  auto name = token->AsString();
+  if (script_->GetBLAS(name) != nullptr)
+    return Result("BLAS with this name already defined");
+
+  std::unique_ptr<BLAS> blas = MakeUnique<BLAS>();
+  blas->SetName(name);
+
+  token = tokenizer_->NextToken();
+  if (!token->IsEOL())
+    return Result("New line expected");
+
+  Result r;
+  while (true) {
+    token = tokenizer_->NextToken();
+    if (token->IsEOL())
+      continue;
+    if (token->IsEOS())
+      return Result("END command missing");
+    if (!token->IsIdentifier())
+      return Result("Identifier expected");
+
+    auto geom = token->AsString();
+    if (geom == "END")
+      break;
+    else if (geom == "GEOMETRY") {
+      token = tokenizer_->NextToken();
+      if (!token->IsIdentifier())
+        return Result("Identifier expected");
+
+      auto type = token->AsString();
+      if (type == "TRIANGLE")
+        r = ParseBLASTriangle(blas);
+      else if (type == "AABB")
+        r = ParseBLASAABB(blas);
+      else
+        return Result("Unexpected geometry type");
+    }
+    else
+      return Result("Unexpected identifier");
+
+    if (!r.IsSuccess())
+      return r;
+  }
+
+  if (blas->GetGeometrySize() > 0) {
+    auto type = blas->GetGeometries()[0]->GetType();
+    auto geometries = blas->GetGeometries();
+    for (auto g: geometries)
+      if (g->GetType() != type)
+        return Result("Only one type of geometries is allowed within BLAS");
+  }
+
+  r = script_->AddBLAS(std::move(blas));
+  if (!r.IsSuccess())
+    return r;
+
+  return {};
+}
+Result Parser::ParseBLASTriangle(std::unique_ptr<BLAS>& blas) {
+  std::unique_ptr<Geometry> geometry = MakeUnique<Geometry>();
+  geometry->SetType(GeometryType::kTriangle);
+
+  // Reading VERTEX records
+  while (true) {
+    auto token = tokenizer_->NextToken();
+    std::string tok;
+
+    if (token->IsEOS())
+      return Result("END expected");
+    if (token->IsEOL())
+      continue;
+
+    tok = token->AsString();
+
+    if (tok == "END") {
+      break;
+    } else if (tok == "VERTEX") {
+      std::vector<float> g(3);
+
+      for (size_t i = 0; i < g.size(); i++) {
+        token = tokenizer_->NextToken();
+        if (token->IsEOL() || token->IsEOS())
+          return Result("missing value");
+        if (!token->IsDouble() && !token->IsInteger())
+          return Result("invalid value");
+
+        g[i] = token->AsFloat();
+      }
+
+      geometry->SetData(g);
+    } else
+      return Result("Unexpected data type");
+  }
+
+  blas->AddGeometry(std::shared_ptr<Geometry>(geometry.release()));
+
+  return {};
+}
+Result Parser::ParseBLASAABB(std::unique_ptr<BLAS>& blas) {
+  std::unique_ptr<Geometry> geometry = MakeUnique<Geometry>();
+  geometry->SetType(GeometryType::kAABB);
+
+  // Reading AABB records
+  while (true) {
+    auto token = tokenizer_->NextToken();
+    std::string tok;
+
+    if (token->IsEOS())
+      return Result("END expected");
+    if (token->IsEOL())
+      continue;
+
+    tok = token->AsString();
+
+    if (tok == "END") {
+      break;
+    } else if (tok == "AABB") {
+      std::vector<float> g(6);
+
+      for (size_t i = 0; i < g.size(); i++) {
+        token = tokenizer_->NextToken();
+        if (token->IsEOL() || token->IsEOS())
+          return Result("missing value");
+        if (!token->IsDouble() && !token->IsInteger())
+          return Result("invalid value");
+
+        g[i] = token->AsFloat();
+      }
+
+      geometry->SetData(g);
+    } else
+      return Result("Unexpected data type");
+  }
+
+  blas->AddGeometry(std::shared_ptr<Geometry>(geometry.release()));
+
+  return {};
+}
+
+Result Parser::ParseTLAS() {
+  auto token = tokenizer_->NextToken();
+  if (!token->IsIdentifier())
+    return Result("invalid TLAS name provided");
+
+  auto name = token->AsString();
+
+  token = tokenizer_->NextToken();
+  if (!token->IsEOL())
+    return Result("New line expected");
+
+  std::unique_ptr<TLAS> tlas;
+
+  tlas = MakeUnique<TLAS>();
+  tlas->SetName(name);
+
+  while (true) {
+    token = tokenizer_->NextToken();
+    if (token->IsEOL())
+      continue;
+    if (token->IsEOS())
+      return Result("END command missing");
+    if (!token->IsIdentifier())
+      return Result("expected identifier");
+
+    Result r;
+    std::string tok = token->AsString();
+    if (tok == "END")
+      break;
+    else if (tok == "BLAS_INSTANCE")
+      r = ParseBLASInstance(tlas);
+    else
+      r = Result("unknown token: " + tok);
+
+    if (!r.IsSuccess())
+      return Result(make_error(r.Error()));
+  }
+
+  Result r = script_->AddTLAS(std::move(tlas));
+  if (!r.IsSuccess())
+    return r;
+
+  return {};
+}
+
+// TLAS BLAS_INSTANCE USE <blas_name> [MASK 0-255] [OFFSET 0-16777215] [INDEX 0-16777215] [FLAGS {flags} [END]] [TRANSFORM {float x 12} END]
+// flags is space or EOL separated list of following:
+//   TRIANGLE_FACING_CULL_DISABLE
+//   TRIANGLE_FLIP_FACING
+//   FORCE_OPAQUE
+//   FORCE_NO_OPAQUE
+//   FORCE_OPACITY_MICROMAP_2_STATE
+//   DISABLE_OPACITY_MICROMAPS
+//   <any integer number>
+// if flags is space separated list specified on same line as FLAGS statemnt then END must be omitted
+// otherwise END must be present conclude the list of flags
+Result Parser::ParseBLASInstance(std::unique_ptr<TLAS>& tlas) {
+  std::unique_ptr<Token> token;
+  std::string name;
+  std::unique_ptr<BLASInstance> instance = MakeUnique<BLASInstance>();
+  bool singleline = !tokenizer_->PeekNextToken()->IsEOL();
+
+  while (true) {
+    token = tokenizer_->NextToken();
+    if (token->IsEOS())
+      return Result("Unexpected end");
+    if (token->IsEOL()) {
+      if (singleline)
+        break;
+      else
+        continue;
+    }
+    if (!token->IsIdentifier())
+      return Result("expected identifier");
+
+    Result r;
+    std::string tok = token->AsString();
+    if (tok == "END")
+      break;
+    else if (tok == "TRANSFORM")
+      r = ParseBLASInstanceTransform(*instance.get());
+    else if (tok == "FLAGS")
+      r = ParseBLASInstanceFlags(*instance.get());
+    else if (tok == "USE") {
+      token = tokenizer_->NextToken();
+
+      if (!token->IsIdentifier())
+        return Result("BLAS name expected");
+
+      tok = token->AsString();
+      auto ptr = script_->GetBLAS(tok);
+
+      if (!ptr)
+        return Result("BLAS with such name not found");
+
+      instance->SetUsedBLAS(tok, ptr);
+    }
+    else if (tok == "MASK") {
+      token = tokenizer_->NextToken();
+      uint64_t v;
+
+      if (token->IsInteger())
+        v = token->AsInt64();
+      else if (token->IsHex())
+        v = token->AsHex();
+      else
+        return Result("Integer or hex identifier expected");
+
+      instance->SetMask(uint32_t(v));
+    } else if (tok == "OFFSET") {
+      token = tokenizer_->NextToken();
+      uint64_t v;
+
+      if (token->IsInteger())
+        v = token->AsInt64();
+      else if (token->IsHex())
+        v = token->AsHex();
+      else
+        return Result("Integer or hex identifier expected");
+
+      instance->SetOffset(uint32_t(v));
+    } else if (tok == "INDEX") {
+      token = tokenizer_->NextToken();
+      uint64_t v;
+
+      if (token->IsInteger())
+        v = token->AsInt64();
+      else if (token->IsHex())
+        v = token->AsHex();
+      else
+        return Result("Integer or hex identifier expected");
+
+      instance->SetInstanceIndex(uint32_t(v));
+    } else {
+      r = Result("Unknown token in BLAS block: " + tok);
+    }
+
+    if (!r.IsSuccess())
+      return r;
+  }
+
+  if (instance->GetUsedBLASName().empty())
+    return Result("Instance does not specify USE");
+
+  tlas->AddInstance(std::move(instance));
+
+  return {};
+}
+
+Result Parser::ParseBLASInstanceTransform(BLASInstance& instance) {
+  std::unique_ptr<Token> token;
+  std::vector<float> transform;
+  Result r;
+
+  transform.reserve(12);
+
+  while (true) {
+    token = tokenizer_->NextToken();
+    if (token->IsEOL())
+      continue;
+    if (token->IsEOS())
+      return Result("END command missing");
+
+    if (token->IsIdentifier() && token->AsString() == "END")
+      break;
+    else if (token->IsDouble() || token->IsInteger())
+      transform.push_back(token->AsFloat());
+    else
+      r = Result("Unknown token: " + token->AsString());
+
+    if (!r.IsSuccess())
+      return Result(make_error(r.Error()));
+  }
+
+  if (transform.size() != 12)
+    r = Result("Transform matrix expected to have 12 numbers");
+
+  instance.SetTransform(transform);
+
+  return {};
+}
+
+Result Parser::ParseBLASInstanceFlags(BLASInstance& instance) {
+  std::unique_ptr<Token> token;
+  uint32_t flags = 0;
+  bool firsteol = true;
+  bool singleline = true;
+  Result r;
+
+  while (true) {
+    token = tokenizer_->NextToken();
+    if (token->IsEOL()) {
+      if (firsteol) {
+        firsteol = false;
+        singleline = (flags != 0);
+      }
+      if (singleline)
+        break;
+      else
+        continue;
+    }
+    if (token->IsEOS())
+      return Result("END command missing");
+
+    if (token->IsInteger())
+      flags |= token->AsInt32();
+    else if (token->IsHex())
+      flags |= uint32_t(token->AsHex());
+    else if (token->IsIdentifier()) {
+      if (token->AsString() == "END")
+        break;
+      else if (token->AsString() == "TRIANGLE_FACING_CULL_DISABLE")
+        flags |= VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+      else if (token->AsString() == "TRIANGLE_FLIP_FACING")
+        flags |= VK_GEOMETRY_INSTANCE_TRIANGLE_FLIP_FACING_BIT_KHR;
+      else if (token->AsString() == "FORCE_OPAQUE")
+        flags |= VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;
+      else if (token->AsString() == "FORCE_NO_OPAQUE")
+        flags |= VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR;
+      else if (token->AsString() == "FORCE_OPACITY_MICROMAP_2_STATE")
+        flags |= VK_GEOMETRY_INSTANCE_FORCE_OPACITY_MICROMAP_2_STATE_EXT;
+      else if (token->AsString() == "DISABLE_OPACITY_MICROMAPS")
+        flags |= VK_GEOMETRY_INSTANCE_DISABLE_OPACITY_MICROMAPS_EXT;
+      else
+        r = Result("Unknown flag: " + token->AsString());
+    }
+    else
+      r = Result("Identifier expected");
+
+    if (!r.IsSuccess())
+      return Result(make_error(r.Error()));
+  }
+
+  if (r.IsSuccess() && flags != 0)
+    instance.SetFlags(flags);
+
+  return {};
+}
+
+Result Parser::ParseSBT(Pipeline* pipeline) {
+  auto token = tokenizer_->NextToken();
+  if (!token->IsIdentifier())
+    return Result("SBT requires a name");
+
+  auto name = token->AsString();
+  if (pipeline->GetSBT(name) != nullptr)
+    return Result("SBT with this name already defined");
+
+  std::unique_ptr<SBT> sbt = MakeUnique<SBT>();
+  sbt->SetName(name);
+
+  token = tokenizer_->NextToken();
+  if (!token->IsEOL())
+    return Result("New line expected");
+
+  Result r;
+  while (true) {
+    token = tokenizer_->NextToken();
+    if (token->IsEOL())
+      continue;
+    if (token->IsEOS())
+      return Result("END command missing");
+    if (!token->IsIdentifier())
+      return Result("Identifier expected");
+
+    auto tok = token->AsString();
+    if (tok == "END")
+      break;
+    else if (tok == "USE") {
+      token = tokenizer_->NextToken();
+      if (!token->IsIdentifier())
+        return Result("shader group name is expected");
+
+      auto shader_group_name = token->AsString();
+      uint32_t shader_group_count = 1;
+
+      if (shader_group_name == "NULL")
+        shader_group_name = "";
+
+      token = tokenizer_->NextToken();
+      if (token->IsInteger())
+        shader_group_count = token->AsUint32();
+      else if (!token->IsEOL())
+        return Result("unexpected extra statement after group name");
+
+      std::unique_ptr<SBTRecord> sbtrecord = MakeUnique<SBTRecord>();
+
+      sbtrecord->SetUsedShaderGroupName(
+          shader_group_name, pipeline->GetShaderGroupIndex(shader_group_name));
+      sbtrecord->SetCount(shader_group_count);
+
+      sbt->AddSBTRecord(std::move(sbtrecord));
+    } else
+      return Result("Unexpected identifier");
+
+    if (!r.IsSuccess())
+      return r;
+  }
+
+  r = pipeline->AddSBT(std::move(sbt));
+  if (!r.IsSuccess())
+    return r;
+
+  return {};
 }
 
 Result Parser::ParseTolerances(std::vector<Probe::Tolerance>* tolerances) {

@@ -1,4 +1,5 @@
 // Copyright 2018 The Amber Authors.
+// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -130,7 +131,10 @@ bool Script::IsKnownFeature(const std::string& name) const {
          name == "SubgroupSupportedStages.fragment" ||
          name == "SubgroupSupportedStages.compute" ||
          name ==
-             "ShaderSubgroupExtendedTypesFeatures.shaderSubgroupExtendedTypes";
+             "ShaderSubgroupExtendedTypesFeatures.shaderSubgroupExtendedTypes" ||
+         name == "RayTracingPipelineFeaturesKHR.rayTracingPipeline" ||
+         name == "AccelerationStructureFeaturesKHR.accelerationStructure" ||
+         name == "BufferDeviceAddressFeatures.bufferDeviceAddress";
 }
 
 type::Type* Script::ParseType(const std::string& str) {

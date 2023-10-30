@@ -1,4 +1,5 @@
 // Copyright 2018 The Amber Authors.
+// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -99,13 +100,15 @@ Result Pipeline::AddShader(Shader* shader, ShaderType shader_type) {
     return Result("can not add a compute shader to a graphics pipeline");
   }
 
-  for (auto& info : shaders_) {
-    const auto* is = info.GetShader();
-    if (is == shader)
-      return Result("can not add duplicate shader to pipeline");
-    if (is->GetType() == shader_type) {
-      info.SetShader(shader);
-      return {};
+  if (pipeline_type_ != PipelineType::kRayTracing) {
+    for (auto& info : shaders_) {
+      const auto* is = info.GetShader();
+      if (is == shader)
+        return Result("can not add duplicate shader to pipeline");
+      if (is->GetType() == shader_type) {
+        info.SetShader(shader);
+        return {};
+      }
     }
   }
 
@@ -292,10 +295,17 @@ Result Pipeline::Validate() const {
     }
   }
 
-  if (pipeline_type_ == PipelineType::kGraphics)
+  if (pipeline_type_ == PipelineType::kRayTracing)
+    return ValidateRayTracing();
+  else if (pipeline_type_ == PipelineType::kGraphics)
     return ValidateGraphics();
 
   return ValidateCompute();
+}
+
+Result Pipeline::ValidateRayTracing() const {
+  // TODO
+  return {};
 }
 
 Result Pipeline::ValidateGraphics() const {
@@ -651,6 +661,15 @@ void Pipeline::AddSampler(uint32_t mask,
   info.arg_name = "";
   info.arg_no = std::numeric_limits<uint32_t>::max();
   info.mask = mask;
+  info.descriptor_set = descriptor_set;
+  info.binding = binding;
+}
+
+void Pipeline::AddTLAS(TLAS* tlas, uint32_t descriptor_set, uint32_t binding) {
+  tlases_.push_back(TLASInfo(tlas));
+
+  auto& info = tlases_.back();
+
   info.descriptor_set = descriptor_set;
   info.binding = binding;
 }

@@ -1,4 +1,5 @@
 // Copyright 2018 The Amber Authors.
+// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -88,6 +89,17 @@ Result TransferBuffer::Initialize() {
   }
 
   return MapMemory(memory_);
+}
+
+VkDeviceAddress TransferBuffer::getBufferDeviceAddress() {
+  const VkBufferDeviceAddressInfo bufferDeviceAddressInfo = {
+      VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR,
+      nullptr,
+      GetVkBuffer(),
+  };
+
+  return device_->GetPtrs()->vkGetBufferDeviceAddress(device_->GetVkDevice(),
+                                                      &bufferDeviceAddressInfo);
 }
 
 void TransferBuffer::CopyToDevice(CommandBuffer* command_buffer) {

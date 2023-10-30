@@ -1,4 +1,5 @@
 // Copyright 2018 The Amber Authors.
+// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,18 +18,31 @@
 
 #include <memory>
 #include <vector>
+#include <map>
 
 #include "amber/result.h"
 #include "amber/value.h"
 #include "amber/vulkan_header.h"
 
 namespace amber {
+
+class BLAS;
+class TLAS;
+class SBT;
+
 namespace vulkan {
 
 class CommandBuffer;
 class Device;
 class TransferBuffer;
 class TransferImage;
+class BLAS;
+class TLAS;
+class SBT;
+
+typedef std::map<amber::BLAS*, amber::vulkan::BLAS*> blases_t;
+typedef std::map<amber::TLAS*, amber::vulkan::TLAS*> tlases_t;
+typedef std::map<amber::SBT*, amber::vulkan::SBT*> sbts_t;
 
 // Class for Vulkan resources. Its children are Vulkan Buffer and Vulkan Image.
 class Resource {
@@ -52,6 +66,9 @@ class Resource {
   virtual Result Initialize() = 0;
   virtual TransferBuffer* AsTransferBuffer() { return nullptr; }
   virtual TransferImage* AsTransferImage() { return nullptr; }
+  virtual void AddAllocateFlags(VkMemoryAllocateFlags memory_allocate_flags) {
+    memory_allocate_flags_ |= memory_allocate_flags;
+  }
 
  protected:
   Resource(Device* device, uint32_t size);
@@ -90,6 +107,7 @@ class Resource {
   uint32_t size_in_bytes_ = 0;
   void* memory_ptr_ = nullptr;
   bool is_read_only_ = false;
+  VkMemoryAllocateFlags memory_allocate_flags_ = 0u;
 };
 
 }  // namespace vulkan

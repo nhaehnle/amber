@@ -1,4 +1,5 @@
 # Copyright 2018 The Amber Authors.
+# Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,6 +14,7 @@
 # limitations under the License.
 
 set(AMBER_SOURCES
+    acceleration_structure.cc
     amber.cc
     amberscript/parser.cc
     buffer.cc
