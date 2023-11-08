@@ -324,10 +324,8 @@ Result Parser::Parse(const std::string& data) {
       r = ParseSampler();
     } else if (tok == "VIRTUAL_FILE") {
       r = ParseVirtualFile();
-    } else if (tok == "BLAS") {
-      r = ParseBLAS();
-    } else if (tok == "TLAS") {
-      r = ParseTLAS();
+    } else if (tok == "ACCELERATION_STRUCTURE") {
+      r = ParseAS();
     } else {
       r = Result("unknown token: " + tok);
     }
@@ -649,7 +647,7 @@ Result Parser::ParsePipelineBody(const std::string& cmd_name,
       r = ParsePipelineBlend(pipeline.get());
     } else if (tok == "SHADER_GROUP") {
       r = ParsePipelineShaderGroup(pipeline.get());
-    } else if (tok == "SBT") {
+    } else if (tok == "SHADER_BINDING_TABLE") {
       r = ParseSBT(pipeline.get());
     } else {
       r = Result("unknown token in pipeline block: " + tok);
@@ -1443,14 +1441,14 @@ Result Parser::ParsePipelineBind(Pipeline* pipeline) {
     } else {
       return Result("missing DESCRIPTOR_SET or KERNEL for BIND command");
     }
-  } else if (object_type == "TLAS") {
+  } else if (object_type == "ACCELERATION_STRUCTURE") {
     token = tokenizer_->NextToken();
     if (!token->IsIdentifier())
       return Result("missing top level acceleration structure name in BIND command");
 
     TLAS* tlas = script_->GetTLAS(token->AsString());
     if (!tlas)
-      return Result("unknown TLAS: " + token->AsString());
+      return Result("unknown top level acceleration structure: " + token->AsString());
 
     token = tokenizer_->NextToken();
     if (token->AsString() == "DESCRIPTOR_SET") {
@@ -2707,22 +2705,45 @@ Result Parser::ParseRun() {
     auto cmd = MakeUnique<RayTracingCommand>(pipeline);
     cmd->SetLine(line);
 
-    for (int i = 0; i < 4; i++) {
+    while (true) {
+      if (tokenizer_->PeekNextToken()->IsInteger())
+        break;
+
+      token = tokenizer_->NextToken();
+
+      if (token->IsEOL() || token->IsEOS())
+        return Result("Incomplete RUN command");
+
+      if (!token->IsIdentifier())
+        return Result("Shader binding table expected");
+
+      std::string tok = token->AsString();
       token = tokenizer_->NextToken();
 
       if (!token->IsIdentifier())
-        return Result("SBT name expected");
+        return Result("Shader binding table name expected");
 
       std::string sbtname = token->AsString();
-      SBT* sbt = pipeline->GetSBT(sbtname);
 
-      if (sbtname != "NULL" && sbt == nullptr)
-        return Result("SBT is undefined: " + token->ToOriginalString());
-
-      if (i == 0)      cmd->SetRayGenSBTName(sbtname);
-      else if (i == 1) cmd->SetMissSBTName(sbtname);
-      else if (i == 2) cmd->SetHitsSBTName(sbtname);
-      else             cmd->SetCallSBTName(sbtname);
+      if (tok == "RAYGEN") {
+        if (!cmd->GetRayGenSBTName().empty())
+          return Result("RAYGEN shader binding table can specified only once");
+        cmd->SetRayGenSBTName(sbtname);
+      } else if (tok == "MISS") {
+        if (!cmd->GetMissSBTName().empty())
+          return Result("MISS shader binding table can specified only once");
+        cmd->SetMissSBTName(sbtname);
+      } else if (tok == "HIT") {
+        if (!cmd->GetHitsSBTName().empty())
+          return Result("HIT shader binding table can specified only once");
+        cmd->SetHitsSBTName(sbtname);
+      } else if (tok == "CALL") {
+        if (!cmd->GetCallSBTName().empty())
+          return Result("CALL shader binding table can specified only once");
+        cmd->SetCallSBTName(sbtname);
+      }
+      else
+        return Result("Unexpected shader binding table");
     }
 
     for (int i = 0; i < 3; i++) {
@@ -3889,14 +3910,31 @@ bool Parser::IsRayTracingShader(ShaderType type) {
          type == kShaderTypeIntersection || type == kShaderTypeCall;
 }
 
-Result Parser::ParseBLAS() {
+Result Parser::ParseAS() {
   auto token = tokenizer_->NextToken();
   if (!token->IsIdentifier())
-    return Result("BLAS requires a name");
+    return Result("Acceleration structure requires TOP_LEVEL or BOTTOM_LEVEL");
+
+  Result r;
+  auto type = token->AsString();
+  if (type == "BOTTOM_LEVEL")
+    r = ParseBLAS();
+  else if (type == "TOP_LEVEL")
+    r = ParseTLAS();
+  else
+    return Result("Unexpected acceleration structure type");
+
+  return {};
+}
+
+  Result Parser::ParseBLAS() {
+  auto token = tokenizer_->NextToken();
+  if (!token->IsIdentifier())
+    return Result("Bottom level acceleration structure requires a name");
 
   auto name = token->AsString();
   if (script_->GetBLAS(name) != nullptr)
-    return Result("BLAS with this name already defined");
+    return Result("Bottom level acceleration structure with this name already defined");
 
   std::unique_ptr<BLAS> blas = MakeUnique<BLAS>();
   blas->SetName(name);
@@ -3924,9 +3962,9 @@ Result Parser::ParseBLAS() {
         return Result("Identifier expected");
 
       auto type = token->AsString();
-      if (type == "TRIANGLE")
+      if (type == "TRIANGLES")
         r = ParseBLASTriangle(blas);
-      else if (type == "AABB")
+      else if (type == "AABBS")
         r = ParseBLASAABB(blas);
       else
         return Result("Unexpected geometry type");
@@ -3952,41 +3990,44 @@ Result Parser::ParseBLAS() {
 
   return {};
 }
+
 Result Parser::ParseBLASTriangle(std::unique_ptr<BLAS>& blas) {
   std::unique_ptr<Geometry> geometry = MakeUnique<Geometry>();
+  std::vector<float> g;
   geometry->SetType(GeometryType::kTriangle);
 
-  // Reading VERTEX records
   while (true) {
     auto token = tokenizer_->NextToken();
-    std::string tok;
 
     if (token->IsEOS())
       return Result("END expected");
     if (token->IsEOL())
       continue;
 
-    tok = token->AsString();
-
-    if (tok == "END") {
-      break;
-    } else if (tok == "VERTEX") {
-      std::vector<float> g(3);
-
-      for (size_t i = 0; i < g.size(); i++) {
-        token = tokenizer_->NextToken();
-        if (token->IsEOL() || token->IsEOS())
-          return Result("missing value");
-        if (!token->IsDouble() && !token->IsInteger())
-          return Result("invalid value");
-
-        g[i] = token->AsFloat();
-      }
-
-      geometry->SetData(g);
+    if (token->IsIdentifier()) {
+      std::string tok = token->AsString();
+      if (tok == "END")
+        break;
+      else
+        return Result("END or float value is expected");
+    } else if (token->IsInteger() || token->IsDouble()) {
+      g.push_back(token->AsFloat());
     } else
       return Result("Unexpected data type");
   }
+
+  if (g.empty())
+    return Result("No triangles have been specified.");
+
+  if (g.size() % 3 != 0)
+    return Result("Each vertex consists of three float coordinates.");
+
+  if ((g.size() / 3) % 3 != 0)
+    return Result("Each triangle should include three vertices.");
+
+  //g.resize(3);
+
+  geometry->SetData(g);
 
   blas->AddGeometry(std::shared_ptr<Geometry>(geometry.release()));
 
@@ -3994,39 +4035,36 @@ Result Parser::ParseBLASTriangle(std::unique_ptr<BLAS>& blas) {
 }
 Result Parser::ParseBLASAABB(std::unique_ptr<BLAS>& blas) {
   std::unique_ptr<Geometry> geometry = MakeUnique<Geometry>();
+  std::vector<float> g;
   geometry->SetType(GeometryType::kAABB);
 
-  // Reading AABB records
   while (true) {
     auto token = tokenizer_->NextToken();
-    std::string tok;
 
     if (token->IsEOS())
       return Result("END expected");
     if (token->IsEOL())
       continue;
 
-    tok = token->AsString();
-
-    if (tok == "END") {
-      break;
-    } else if (tok == "AABB") {
-      std::vector<float> g(6);
-
-      for (size_t i = 0; i < g.size(); i++) {
-        token = tokenizer_->NextToken();
-        if (token->IsEOL() || token->IsEOS())
-          return Result("missing value");
-        if (!token->IsDouble() && !token->IsInteger())
-          return Result("invalid value");
-
-        g[i] = token->AsFloat();
-      }
-
-      geometry->SetData(g);
+    if (token->IsIdentifier()) {
+      std::string tok = token->AsString();
+      if (tok == "END")
+        break;
+      else
+        return Result("END or float value is expected");
+    } else if (token->IsInteger() || token->IsDouble()) {
+      g.push_back(token->AsFloat());
     } else
       return Result("Unexpected data type");
   }
+
+  if (g.empty())
+    return Result("No AABBs have been specified.");
+
+  if ((g.size() % 6) != 0)
+    return Result(
+        "Each vertex consists of three float coordinates. Each AABB should "
+        "include two vertices.");
 
   blas->AddGeometry(std::shared_ptr<Geometry>(geometry.release()));
 
@@ -4062,7 +4100,7 @@ Result Parser::ParseTLAS() {
     std::string tok = token->AsString();
     if (tok == "END")
       break;
-    else if (tok == "BLAS_INSTANCE")
+    else if (tok == "BOTTOM_LEVEL_INSTANCE")
       r = ParseBLASInstance(tlas);
     else
       r = Result("unknown token: " + tok);
@@ -4078,8 +4116,8 @@ Result Parser::ParseTLAS() {
   return {};
 }
 
-// TLAS BLAS_INSTANCE USE <blas_name> [MASK 0-255] [OFFSET 0-16777215] [INDEX 0-16777215] [FLAGS {flags} [END]] [TRANSFORM {float x 12} END]
-// flags is space or EOL separated list of following:
+// BOTTOM_LEVEL_INSTANCE <blas_name> [MASK 0-255] [OFFSET 0-16777215] [INDEX 0-16777215] [FLAGS {flags}] [TRANSFORM {float x 12} END]
+// flags is space separated list of following:
 //   TRIANGLE_FACING_CULL_DISABLE
 //   TRIANGLE_FLIP_FACING
 //   FORCE_OPAQUE
@@ -4087,24 +4125,30 @@ Result Parser::ParseTLAS() {
 //   FORCE_OPACITY_MICROMAP_2_STATE
 //   DISABLE_OPACITY_MICROMAPS
 //   <any integer number>
-// if flags is space separated list specified on same line as FLAGS statemnt then END must be omitted
-// otherwise END must be present conclude the list of flags
 Result Parser::ParseBLASInstance(std::unique_ptr<TLAS>& tlas) {
   std::unique_ptr<Token> token;
-  std::string name;
   std::unique_ptr<BLASInstance> instance = MakeUnique<BLASInstance>();
-  bool singleline = !tokenizer_->PeekNextToken()->IsEOL();
+
+  token = tokenizer_->NextToken();
+
+  if (!token->IsIdentifier())
+    return Result("Bottom level acceleration structure name expected");
+
+  std::string name = token->AsString();
+  auto ptr = script_->GetBLAS(name);
+
+  if (!ptr)
+    return Result("Bottom level acceleration structure with such name not found");
+
+  instance->SetUsedBLAS(name, ptr);
 
   while (true) {
     token = tokenizer_->NextToken();
     if (token->IsEOS())
       return Result("Unexpected end");
-    if (token->IsEOL()) {
-      if (singleline)
-        break;
-      else
-        continue;
-    }
+    if (token->IsEOL())
+      continue;
+
     if (!token->IsIdentifier())
       return Result("expected identifier");
 
@@ -4116,20 +4160,6 @@ Result Parser::ParseBLASInstance(std::unique_ptr<TLAS>& tlas) {
       r = ParseBLASInstanceTransform(*instance.get());
     else if (tok == "FLAGS")
       r = ParseBLASInstanceFlags(*instance.get());
-    else if (tok == "USE") {
-      token = tokenizer_->NextToken();
-
-      if (!token->IsIdentifier())
-        return Result("BLAS name expected");
-
-      tok = token->AsString();
-      auto ptr = script_->GetBLAS(tok);
-
-      if (!ptr)
-        return Result("BLAS with such name not found");
-
-      instance->SetUsedBLAS(tok, ptr);
-    }
     else if (tok == "MASK") {
       token = tokenizer_->NextToken();
       uint64_t v;
@@ -4167,7 +4197,7 @@ Result Parser::ParseBLASInstance(std::unique_ptr<TLAS>& tlas) {
 
       instance->SetInstanceIndex(uint32_t(v));
     } else {
-      r = Result("Unknown token in BLAS block: " + tok);
+      r = Result("Unknown token in BOTTOM_LEVEL_INSTANCE block: " + tok);
     }
 
     if (!r.IsSuccess())
@@ -4301,32 +4331,14 @@ Result Parser::ParseSBT(Pipeline* pipeline) {
     auto tok = token->AsString();
     if (tok == "END")
       break;
-    else if (tok == "USE") {
-      token = tokenizer_->NextToken();
-      if (!token->IsIdentifier())
-        return Result("shader group name is expected");
-
-      auto shader_group_name = token->AsString();
-      uint32_t shader_group_count = 1;
-
-      if (shader_group_name == "NULL")
-        shader_group_name = "";
-
-      token = tokenizer_->NextToken();
-      if (token->IsInteger())
-        shader_group_count = token->AsUint32();
-      else if (!token->IsEOL())
-        return Result("unexpected extra statement after group name");
-
+    else {
       std::unique_ptr<SBTRecord> sbtrecord = MakeUnique<SBTRecord>();
 
-      sbtrecord->SetUsedShaderGroupName(
-          shader_group_name, pipeline->GetShaderGroupIndex(shader_group_name));
-      sbtrecord->SetCount(shader_group_count);
+      sbtrecord->SetUsedShaderGroupName(tok, pipeline->GetShaderGroupIndex(tok));
+      sbtrecord->SetCount(1);
 
       sbt->AddSBTRecord(std::move(sbtrecord));
-    } else
-      return Result("Unexpected identifier");
+    }
 
     if (!r.IsSuccess())
       return r;

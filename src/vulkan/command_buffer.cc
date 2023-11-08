@@ -86,8 +86,9 @@ Result CommandBuffer::SubmitAndReset(uint32_t timeout_ms) {
   submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submit_info.commandBufferCount = 1;
   submit_info.pCommandBuffers = &command_;
-  if (device_->GetPtrs()->vkQueueSubmit(device_->GetVkQueue(), 1, &submit_info,
-                                        fence_) != VK_SUCCESS) {
+  VkResult result = device_->GetPtrs()->vkQueueSubmit(device_->GetVkQueue(), 1,
+                                                      &submit_info, fence_);
+  if (result != VK_SUCCESS) {
     return Result("Vulkan::Calling vkQueueSubmit Fail");
   }
 

@@ -97,6 +97,7 @@ class Parser : public amber::Parser {
   Result ParseShaderSpecialization(Pipeline* pipeline);
   Result ParseSampler();
   bool IsRayTracingShader(ShaderType type);
+  Result ParseAS();
   Result ParseBLAS();
   Result ParseBLASTriangle(std::unique_ptr<BLAS>& blas);
   Result ParseBLASAABB(std::unique_ptr<BLAS>& blas);

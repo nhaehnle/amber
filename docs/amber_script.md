@@ -398,7 +398,7 @@ should use `clamp_to_edge` for the array index.
 
 ### Acceleration Structures
 
-Acceleration structures are used describe geometries used to describe scene.
+Acceleration structures are used to enumerate geometries to describe scene.
 There are two kinds of acceleration structures:
  * Bottom level
  * Top level
@@ -410,26 +410,26 @@ Each bottom level acceleration structure can consists either of triangle or
 axis aligned bounding box (AABB) geometries. It is prohibited to mix triangle
 geometries and AABBs inside same bottom level acceleration structures.
 
-BLAS consisting of triangle geometries is defined as:
+Bottom level acceleration structure consisting of triangle geometries is defined as:
 
 ```groovy
   # Bottom level acceleration structure consisting of triangles
-  BLAS {name_of_bottom_level_acceleration_structure}
-    {GEOMETRY TRIANGLE
-      {VERTEX x0 y0 z0
-      VERTEX x1 y1 z1
-      VERTEX x2 y2 z2}+
+  ACCELERATION_STRUCTURE BOTTOM_LEVEL {name_of_bottom_level_acceleration_structure}
+    {GEOMETRY TRIANGLES
+      {x0 y0 z0
+       x1 y1 z1
+       x2 y2 z2}+
     END}+
   END
 ```
 
-BLAS consisting of axis aligned bounding box geometries is defined as:
+Bottom level acceleration structure consisting of axis aligned bounding boxes is defined as:
 
 ```groovy
   # Bottom level acceleration structure consisting of AABBs
-  BLAS {name_of_bottom_level_acceleration_structure}
-    {GEOMETRY AABB
-      {AABB x0 y0 z0 x1 y1 z1}+
+  ACCELERATION_STRUCTURE BOTTOM_LEVEL {name_of_bottom_level_acceleration_structure}
+    {GEOMETRY AABBS
+      {x0 y0 z0 x1 y1 z1}+
     END}+
   END
 ```
@@ -443,14 +443,13 @@ level acceleration structure.
 
 ```groovy
   # Acceleration structure with instance defined in one line
-  TLAS {name_of_top_level_acceleration_structure}
+  ACCELERATION_STRUCTURE TOP_LEVEL {name_of_top_level_acceleration_structure}
     {BLAS_INSTANCE USE {name_of_bottom_level_acceleration_structure}}+
   END
 
   # Acceleration structure with instance defined in multiple lines
-  TLAS {name_of_top_level_acceleration_structure}
-    {BLAS_INSTANCE
-      USE {name_of_bottom_level_acceleration_structure}
+  ACCELERATION_STRUCTURE TOP_LEVEL {name_of_top_level_acceleration_structure}
+    {BOTTOM_LEVEL_INSTANCE {name_of_bottom_level_acceleration_structure}
       [INDEX {index}]
       [OFFSET {offset}]
       [FLAGS {flags}]
@@ -480,10 +479,9 @@ The value of |flags| is space or EOL separated list of following:
  * `DISABLE_OPACITY_MICROMAPS`
  * <any integer number>
 
-If flags is space separated list specified on same line as FLAGS statemnt then END must be omitted
-otherwise END must be present conclude the list of flags.
+If flags is a list specified ended with END statement.
 
-The |transform| is a 12 space separated values describing a transformation to be applied to
+The |transform| is a 12 space separated values describing 3x4 row-major affine transformation matrix applied to
 the acceleration structure.
 
 
@@ -576,18 +574,16 @@ them directly. Next shade groups uploaded into shader binding tables:
 
 ```groovy
   # Create shader binding tables and upload shader groups into it
-  SBT {sbt_name}
-    USE {group_name_1} [{group_count}]
-    [ | USE {group_name_n} [{group_count_n}]]
+  SHADER_BINDING_TABLE {sbt_name}
+    {group_name_1}
+    [ | {group_name_n}]
   END
 ```
 
-To include into SBT multiple shader groups group_count can be specified.
-
 Generally program needs three shader binding tables:
- * ray generation SBT with one ray generation shader group
- * miss SBT containing one or more miss shader groups
- * hit SBT containing one or more hit shader groups
+ * ray generation shader binding table with one ray generation shader group
+ * miss shader binding table containing one or more miss shader groups
+ * hit shader binding table containing one or more hit shader groups
 
 Shader binding tables for call shaders are optional.
 
@@ -883,7 +879,7 @@ Ray tracing pipelines allow also bind top level acceleration structures.
 
 ```groovy
   # Bind the top level acceleration structure at the given descriptor set and binding.
-  BIND {TLAS} {tlas_name} DESCRIPTOR_SET _id_ BINDING _id_
+  BIND ACCELERATION_STRUCTURE {tlas_name} DESCRIPTOR_SET _set_id_ BINDING _id_
 ```
 
 #### OpenCL Plain-Old-Data Arguments
@@ -988,15 +984,20 @@ RUN {pipeline_name} DRAW_ARRAY AS {topology} INDEXED \
 ```groovy
 # Run the |pipeline_name| which must be a `ray tracing` pipeline.
 # Next four shader binding table names should be specified:
-# * |ray_gen_sbt_name| - shader binding table containing ray generation shader group
-# * |miss_sbt_name| - shader binding table containing one or more miss shader groups
-# * |hit_sbt_name| - shader binding table containing one or more hit shader groups
-# * |call_sbt_name| - shader binding table containing one or more call shader groups
-# The value `NULL` can be specified instead of name.
+# * RAYGEN |ray_gen_sbt_name| - shader binding table containing ray generation shader group
+# * MISS |miss_sbt_name| - shader binding table containing one or more miss shader groups
+# * HIT |hit_sbt_name| - shader binding table containing one or more hit shader groups
+# * CALL |call_sbt_name| - shader binding table containing one or more call shader groups
+# RAYGEN is obligatory, other shader binding tables (MISS, HIT and CALL) are optional.
 #
 # The pipeline will be run with the given ray tracing dimensions |x|, |y|, |z|.
 # Each of the x, y and z values must be a uint32.
-RUN {pipeline_name} {ray_gen_sbt_name} {miss_sbt_name} {hit_sbt_name} {call_sbt_name} _x_ _y_ _z_
+RUN {pipeline_name} \
+    [RAYGEN {ray_gen_sbt_name}] \
+    [MISS {miss_sbt_name}] \
+    [HIT {hit_sbt_name}] \
+    [CALL {call_sbt_name}] \
+     _x_ _y_ _z_
 ```
 
 ### Repeating commands

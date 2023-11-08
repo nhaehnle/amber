@@ -112,7 +112,7 @@ Result TLAS::CreateTLAS(amber::TLAS* tlas, blases_t* blases, tlases_t* tlases) {
     VK_FALSE,                                                               //  VkBool32                        arrayOfPointers;
     constNullPtr,                                                           //  VkDeviceOrHostAddressConstKHR   data;
   };
-  VkAccelerationStructureGeometryDataKHR    geometry;
+  VkAccelerationStructureGeometryDataKHR geometry = {};
   geometry.instances = accelerationStructureGeometryInstancesDataKHR;
 
   accelerationStructureGeometryKHR_ =

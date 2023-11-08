@@ -38,6 +38,7 @@ class BLAS {
   bool built = false;
   std::unique_ptr<TransferBuffer> buffer;
   std::unique_ptr<TransferBuffer> scratch_buffer_;
+  std::unique_ptr<TransferBuffer> vertex_buffer_;
   VkAccelerationStructureBuildGeometryInfoKHR
       accelerationStructureBuildGeometryInfoKHR_;
   std::vector<VkAccelerationStructureGeometryKHR>

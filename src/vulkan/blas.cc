@@ -17,6 +17,10 @@
 namespace amber {
 namespace vulkan {
 
+inline VkDeviceSize align(VkDeviceSize v, VkDeviceSize a) {
+  return (v + a - 1) & ~(a - 1);
+}
+
 BLAS::BLAS(Device* device) : device_(device) {}
 
 Result BLAS::CreateBLAS(amber::BLAS* blas) {
@@ -24,24 +28,22 @@ Result BLAS::CreateBLAS(amber::BLAS* blas) {
     return Result("Cannot recreate acceleration structure");
 
   std::vector<std::shared_ptr<Geometry>>& geometries = blas->GetGeometries();
+  std::vector <VkDeviceSize> vertexBufferOffsets;
+  VkDeviceSize vertexBufferSize = 0;
 
-  VkDeviceOrHostAddressConstKHR constNullPtr;
-  VkDeviceOrHostAddressKHR nullPtr;
-
-  constNullPtr.hostAddress = nullptr;
-  nullPtr.hostAddress = nullptr;
+  VkDeviceOrHostAddressConstKHR constNullPtr = {};
+  VkDeviceOrHostAddressKHR nullPtr = {};
 
   accelerationStructureGeometriesKHR_.resize(geometries.size());
   accelerationStructureBuildRangeInfoKHR_.resize(geometries.size());
   maxPrimitiveCounts_.resize(geometries.size());
+  vertexBufferOffsets.resize(geometries.size());
 
   for (size_t geometryNdx = 0; geometryNdx < geometries.size(); ++geometryNdx) {
     const std::shared_ptr<Geometry>&        geometryData = geometries[geometryNdx];
-    VkDeviceOrHostAddressConstKHR           vertexData;
+    VkDeviceOrHostAddressConstKHR           vertexData = {};
     VkAccelerationStructureGeometryDataKHR  geometry;
     VkGeometryTypeKHR                       geometryType = VK_GEOMETRY_TYPE_MAX_ENUM_KHR;
-
-    vertexData.hostAddress = geometryData->GetData().data();
 
     if (geometryData->IsTriangle()) {
       VkAccelerationStructureGeometryTrianglesDataKHR   accelerationStructureGeometryTrianglesDataKHR =
@@ -50,7 +52,7 @@ Result BLAS::CreateBLAS(amber::BLAS* blas) {
         DE_NULL,                                                                //  const void*                     pNext;
         VK_FORMAT_R32G32B32_SFLOAT,                                             //  VkFormat                        vertexFormat;
         vertexData,                                                             //  VkDeviceOrHostAddressConstKHR   vertexData;
-        3 * 3 * sizeof(float),                                                  //  VkDeviceSize                    vertexStride;
+        3 * sizeof(float),                                                      //  VkDeviceSize                    vertexStride;
         static_cast<uint32_t>(geometryData->getVertexCount()),                  //  uint32_t                        maxVertex;
         VK_INDEX_TYPE_NONE_KHR,                                                 //  VkIndexType                     indexType;
         constNullPtr,                                                           //  VkDeviceOrHostAddressConstKHR   indexData;
@@ -66,7 +68,7 @@ Result BLAS::CreateBLAS(amber::BLAS* blas) {
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR,   //  VkStructureType                 sType;
         DE_NULL,                                                            //  const void*                     pNext;
         vertexData,                                                         //  VkDeviceOrHostAddressConstKHR   data;
-        2 * 3 * sizeof(float)                                               //  VkDeviceSize                    stride;
+        sizeof(VkAabbPositionsKHR)                                          //  VkDeviceSize                    stride;
       };
 
       geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
@@ -95,6 +97,10 @@ Result BLAS::CreateBLAS(amber::BLAS* blas) {
     accelerationStructureGeometriesKHR_[geometryNdx]        = accelerationStructureGeometryKHR;
     accelerationStructureBuildRangeInfoKHR_[geometryNdx]    = accelerationStructureBuildRangeInfosKHR;
     maxPrimitiveCounts_[geometryNdx]                        = accelerationStructureBuildRangeInfosKHR.primitiveCount;
+    vertexBufferOffsets[geometryNdx]                        = vertexBufferSize;
+    size_t s1 = sizeof(
+        *geometryData->GetData().data());
+    vertexBufferSize += align(geometryData->GetData().size() * s1, 8);
   }
 
   const VkAccelerationStructureGeometryKHR*     accelerationStructureGeometriesKHRPointer   = accelerationStructureGeometriesKHR_.data();
@@ -165,6 +171,31 @@ Result BLAS::CreateBLAS(amber::BLAS* blas) {
 
     accelerationStructureBuildGeometryInfoKHR_.scratchData.deviceAddress =
         scratch_buffer_->getBufferDeviceAddress();
+  }
+
+  if (vertexBufferSize > 0) {
+    vertex_buffer_ = MakeUnique<TransferBuffer>(
+        device_, (uint32_t)vertexBufferSize, nullptr);
+    vertex_buffer_->AddUsageFlags(
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+    vertex_buffer_->AddAllocateFlags(VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT);
+    vertex_buffer_->Initialize();
+
+    for (size_t geometryNdx = 0; geometryNdx < geometries.size();++geometryNdx) {
+      VkDeviceOrHostAddressConstKHR p;
+
+      p.deviceAddress = vertex_buffer_.get()->getBufferDeviceAddress() +
+                        vertexBufferOffsets[geometryNdx];
+
+      if (geometries[geometryNdx]->IsTriangle()) {
+        accelerationStructureGeometriesKHR_[geometryNdx].geometry.triangles.vertexData = p;
+      } else if (geometries[geometryNdx]->IsAABB()) {
+        accelerationStructureGeometriesKHR_[geometryNdx].geometry.aabbs.data = p;
+      } else {
+        assert(false);
+      }
+    }
   }
 
   return {};
