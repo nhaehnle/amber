@@ -14,6 +14,10 @@
 
 #include "src/vulkan/blas.h"
 
+#include <cstring>
+
+#include "src/vulkan/command_buffer.h"
+
 namespace amber {
 namespace vulkan {
 
@@ -182,11 +186,18 @@ Result BLAS::CreateBLAS(amber::BLAS* blas) {
     vertex_buffer_->AddAllocateFlags(VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT);
     vertex_buffer_->Initialize();
 
+    void* memory_ptr = vertex_buffer_->HostAccessibleMemoryPtr();
+
     for (size_t geometryNdx = 0; geometryNdx < geometries.size();++geometryNdx) {
       VkDeviceOrHostAddressConstKHR p;
 
       p.deviceAddress = vertex_buffer_.get()->getBufferDeviceAddress() +
                         vertexBufferOffsets[geometryNdx];
+
+      const auto& data = geometries[geometryNdx]->GetData();
+      std::memcpy(
+          reinterpret_cast<char*>(memory_ptr) + vertexBufferOffsets[geometryNdx],
+          data.data(), data.size() * sizeof(*data.data()));
 
       if (geometries[geometryNdx]->IsTriangle()) {
         accelerationStructureGeometriesKHR_[geometryNdx].geometry.triangles.vertexData = p;
@@ -201,11 +212,15 @@ Result BLAS::CreateBLAS(amber::BLAS* blas) {
   return {};
 }
 
-Result BLAS::BuildBLAS(VkCommandBuffer cmdBuffer) {
+Result BLAS::BuildBLAS(CommandBuffer* command_buffer) {
   if (blas_ == VK_NULL_HANDLE)
     return Result("Acceleration structure should be created first");
   if (built)
     return {};
+
+  VkCommandBuffer cmdBuffer = command_buffer->GetVkCommandBuffer();
+
+  vertex_buffer_->CopyToDevice(command_buffer);
 
   VkAccelerationStructureBuildRangeInfoKHR*
       accelerationStructureBuildRangeInfoKHRPtr =

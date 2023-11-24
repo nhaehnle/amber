@@ -28,7 +28,7 @@ class BLAS {
   ~BLAS();
 
   Result CreateBLAS(amber::BLAS* blas);
-  Result BuildBLAS(VkCommandBuffer cmdBuffer);
+  Result BuildBLAS(CommandBuffer* command_buffer);
   VkAccelerationStructureKHR GetVkBLAS() { return blas_; }
   VkDeviceAddress getVkBLASDeviceAddress();
 

@@ -172,7 +172,7 @@ Result RayTracingPipeline::TraceRays(amber::SBT* rSBT,
       return guard.GetResult();
 
     for (auto i : *blases_) {
-      i.second->BuildBLAS(GetCommandBuffer()->GetVkCommandBuffer());
+      i.second->BuildBLAS(GetCommandBuffer());
     }
     for (auto i : *tlases_) {
       i.second->BuildTLAS(GetCommandBuffer()->GetVkCommandBuffer());
