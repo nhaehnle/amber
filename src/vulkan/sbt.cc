@@ -15,6 +15,8 @@
 #include "src/vulkan/sbt.h"
 #include "src/vulkan/pipeline.h"
 
+#include <cstring>
+
 namespace amber {
 namespace vulkan {
 

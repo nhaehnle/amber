@@ -49,7 +49,7 @@ Result BLAS::CreateBLAS(amber::BLAS* blas) {
       VkAccelerationStructureGeometryTrianglesDataKHR   accelerationStructureGeometryTrianglesDataKHR =
       {
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,   //  VkStructureType                 sType;
-        DE_NULL,                                                                //  const void*                     pNext;
+        nullptr,                                                                //  const void*                     pNext;
         VK_FORMAT_R32G32B32_SFLOAT,                                             //  VkFormat                        vertexFormat;
         vertexData,                                                             //  VkDeviceOrHostAddressConstKHR   vertexData;
         3 * sizeof(float),                                                      //  VkDeviceSize                    vertexStride;
@@ -66,7 +66,7 @@ Result BLAS::CreateBLAS(amber::BLAS* blas) {
       const VkAccelerationStructureGeometryAabbsDataKHR     accelerationStructureGeometryAabbsDataKHR =
       {
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR,   //  VkStructureType                 sType;
-        DE_NULL,                                                            //  const void*                     pNext;
+        nullptr,                                                            //  const void*                     pNext;
         vertexData,                                                         //  VkDeviceOrHostAddressConstKHR   data;
         sizeof(VkAabbPositionsKHR)                                          //  VkDeviceSize                    stride;
       };
@@ -81,7 +81,7 @@ Result BLAS::CreateBLAS(amber::BLAS* blas) {
     const VkAccelerationStructureGeometryKHR                accelerationStructureGeometryKHR =
     {
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,    //  VkStructureType                         sType;
-      DE_NULL,                                                  //  const void*                             pNext;
+      nullptr,                                                  //  const void*                             pNext;
       geometryType,                                             //  VkGeometryTypeKHR                       geometryType;
       geometry,                                                 //  VkAccelerationStructureGeometryDataKHR  geometry;
       0u,                                                       //  VkGeometryFlagsKHR                      flags;
@@ -107,12 +107,12 @@ Result BLAS::CreateBLAS(amber::BLAS* blas) {
   accelerationStructureBuildGeometryInfoKHR_    =
   {
     VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,   //  VkStructureType                                     sType;
-    DE_NULL,                                                            //  const void*                                         pNext;
+    nullptr,                                                            //  const void*                                         pNext;
     VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,                    //  VkAccelerationStructureTypeKHR                      type;
     0u,                                                                 //  VkBuildAccelerationStructureFlagsKHR                flags;
     VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,                     //  VkBuildAccelerationStructureModeKHR                 mode;
-    DE_NULL,                                                            //  VkAccelerationStructureKHR                          srcAccelerationStructure;
-    DE_NULL,                                                            //  VkAccelerationStructureKHR                          dstAccelerationStructure;
+    nullptr,                                                            //  VkAccelerationStructureKHR                          srcAccelerationStructure;
+    nullptr,                                                            //  VkAccelerationStructureKHR                          dstAccelerationStructure;
     static_cast<uint32_t>(accelerationStructureGeometriesKHR_.size()),  //  uint32_t                                            geometryCount;
     accelerationStructureGeometriesKHRPointer,                          //  const VkAccelerationStructureGeometryKHR*           pGeometries;
     nullptr,                                                            //  const VkAccelerationStructureGeometryKHR* const*    ppGeometries;
@@ -121,7 +121,7 @@ Result BLAS::CreateBLAS(amber::BLAS* blas) {
   VkAccelerationStructureBuildSizesInfoKHR sizeInfo =
   {
     VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR,  //  VkStructureType sType;
-    DE_NULL,                                                        //  const void*     pNext;
+    nullptr,                                                        //  const void*     pNext;
     0,                                                              //  VkDeviceSize    accelerationStructureSize;
     0,                                                              //  VkDeviceSize    updateScratchSize;
     0                                                               //  VkDeviceSize    buildScratchSize;
