@@ -91,6 +91,8 @@ const char kAccelerationStructure[] =
     "AccelerationStructureFeaturesKHR.accelerationStructure";
 const char kBufferDeviceAddress[] =
     "BufferDeviceAddressFeatures.bufferDeviceAddress";
+const char kRayTracingPipeline[] =
+    "RayTracingPipelineFeaturesKHR.rayTracingPipeline";
 
 struct BaseOutStructure {
   VkStructureType sType;
@@ -485,6 +487,8 @@ Result Device::Initialize(
       acceleration_structure_ptrs = nullptr;
   VkPhysicalDeviceBufferDeviceAddressFeatures*
       bda_ptrs = nullptr;
+  VkPhysicalDeviceRayTracingPipelineFeaturesKHR*
+      ray_tracing_pipeline_ptrs = nullptr;
   void* ptr = available_features2.pNext;
   while (ptr != nullptr) {
     BaseOutStructure* s = static_cast<BaseOutStructure*>(ptr);
@@ -523,6 +527,11 @@ Result Device::Initialize(
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES:
         bda_ptrs =
             static_cast<VkPhysicalDeviceBufferDeviceAddressFeatures*>(ptr);
+        break;
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR:
+        ray_tracing_pipeline_ptrs =
+            static_cast<VkPhysicalDeviceRayTracingPipelineFeaturesKHR*>(
+                ptr);
         break;
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
         vulkan11_ptrs = static_cast<VkPhysicalDeviceVulkan11Features*>(ptr);
@@ -586,15 +595,20 @@ Result Device::Initialize(
       return amber::Result(
           "Subgroup extended types requested but feature not returned");
     }
+    if (feature == kAccelerationStructure &&
+        acceleration_structure_ptrs == nullptr) {
+      return amber::Result(
+          "Acceleration structure requested but feature not returned");
+    }
     if (feature == kBufferDeviceAddress && bda_ptrs == nullptr &&
         vulkan12_ptrs == nullptr) {
       return amber::Result(
           "Buffer device address requested but feature not returned");
     }
-    if (feature == kAccelerationStructure &&
-        acceleration_structure_ptrs == nullptr) {
+    if (feature == kRayTracingPipeline &&
+        ray_tracing_pipeline_ptrs == nullptr) {
       return amber::Result(
-          "Acceleration structure requested but feature not returned");
+          "Ray tracing pipeline requested but feature not returned");
     }
 
     // Next check the fields of the feature structures.
