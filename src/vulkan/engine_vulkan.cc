@@ -550,20 +550,26 @@ Result EngineVulkan::GetVkShaderGroupInfo(
               ? VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR
               : VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
 
-      r = pipeline->GetShaderIndex(sg->GetClosestHitShader(),
-                                   &group_info.closestHitShader);
-      if (!r.IsSuccess())
-        return r;
+      if (sg->GetClosestHitShader()) {
+        r = pipeline->GetShaderIndex(sg->GetClosestHitShader(),
+                                     &group_info.closestHitShader);
+        if (!r.IsSuccess())
+          return r;
+      }
 
-      r = pipeline->GetShaderIndex(sg->GetAnyHitShader(),
-                                   &group_info.anyHitShader);
-      if (!r.IsSuccess())
-        return r;
+      if (sg->GetAnyHitShader()) {
+        r = pipeline->GetShaderIndex(sg->GetAnyHitShader(),
+                                     &group_info.anyHitShader);
+        if (!r.IsSuccess())
+          return r;
+      }
 
-      r = pipeline->GetShaderIndex(sg->GetIntersectionShader(),
-                                   &group_info.intersectionShader);
-      if (!r.IsSuccess())
-        return r;
+      if (sg->GetIntersectionShader()) {
+        r = pipeline->GetShaderIndex(sg->GetIntersectionShader(),
+                                     &group_info.intersectionShader);
+        if (!r.IsSuccess())
+          return r;
+      }
 
     } else
       return Result("Uninitialized shader group");
